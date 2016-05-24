@@ -1,6 +1,9 @@
 # codis-rebalancer
+```
 A tool to auto rebalance slots between groups of a codis cluster.
 But now only works with groups with same memory.
+And only for codis 3.0.
+```
 
 ##Usage
 ```
