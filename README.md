@@ -8,9 +8,10 @@ And only for codis 3.0.
 ##Usage
 ```
 Usage of ./codis-rebalancer:
-  -d 127.0.0.1:18080
-        Dashboard Addr: 127.0.0.1:18080
-  -i 10
+  -d string
+        Dashboard Addr. (default "127.0.0.1:18080")
+  -f    Do the action. Default only show the actions.
+  -i int
         Migrate interval. (default 10)
 ```
 

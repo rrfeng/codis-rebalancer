@@ -15,17 +15,26 @@ import (
 
 var d *string = flag.String("d", "127.0.0.1:18080", "Dashboard Addr.")
 var i *int = flag.Int("i", 10, "Migrate interval.")
+var f *bool = flag.Bool("f", false, "Do the action. Default only show the actions.")
 
-type slotinfo struct {
+type slotInfo struct {
 	Id       int         `json:"id"`
 	Group_id int         `json:"group_id"`
 	Action   interface{} `json:"-"`
 }
 
+type groupInfo struct {
+	Id int `json:"id"`
+}
+
+type groupModel struct {
+	Models []groupInfo `json:"models"`
+}
+
 type stats struct {
 	Closed      bool       `json:"closed"`
-	Slots       []slotinfo `json:"slots"`
-	group       interface{}
+	Slots       []slotInfo `json:"slots"`
+	Group       groupModel `json:"group"`
 	proxy       interface{}
 	slot_action interface{}
 }
@@ -67,40 +76,51 @@ func main() {
 		log.Fatalln("Json decode response error: ", err.Error())
 	}
 
-	var groupinfo = map[int][]int{}
+	// from groups get all group, from slots get which slots in the group.
+	var groups = map[int][]int{}
+	for _, g := range s.Stats.Group.Models {
+		groups[g.Id] = []int{}
+	}
 	for _, slot := range s.Stats.Slots {
-		groupinfo[slot.Group_id] = append(groupinfo[slot.Group_id], slot.Id)
+		groups[slot.Group_id] = append(groups[slot.Group_id], slot.Id)
 	}
 
-	bala := balancer(len(groupinfo))
-	slotpool := []int{}
-	targetgroup := map[int]int{}
+	// calc which slots to migrate, which groups to migrate to.
+	bala := balancer(len(groups))
+	slotPool := []int{}
+	targetGroup := map[int]int{}
 	i := 0
-	for gid, slots := range groupinfo {
+	for gid, slots := range groups {
 		if len(slots) > bala[i] {
-			to_remove := pickslots(slots, bala[i])
-			slotpool = append(slotpool, to_remove...)
+			to_remove := pickSlots(slots, bala[i])
+			slotPool = append(slotPool, to_remove...)
 		} else if len(slots) < bala[i] {
-			targetgroup[gid] = bala[i] - len(slots)
+			targetGroup[gid] = bala[i] - len(slots)
 		}
 		i++
 	}
 
-	xauth := genauth(s.Config.Product_name)
+	// do the migrate action.
+	xauth := genAuth(s.Config.Product_name)
 	client := &http.Client{}
-	err = setinterval(i, client, xauth, *d)
+	err = setInterval(i, client, xauth, *d)
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
 
-	for gid, delta := range targetgroup {
+	for gid, delta := range targetGroup {
 		for i := 0; i < delta; i++ {
-			err := migrate(slotpool[0], gid, client, xauth, *d)
-			if err != nil {
-				log.Fatalf("Error migrating slot %d to group %d: %s\n", slotpool[0], gid, err.Error())
+			if *f == true {
+				err := migrate(slotPool[0], gid, client, xauth, *d)
+				if err != nil {
+					log.Fatalf("Error migrating slot %d to group %d: %s\n", slotPool[0], gid, err.Error())
+				} else {
+					slotPool = slotPool[1:]
+					log.Printf("migrate one slot to group %d success, %d to migrate.", gid, len(slotPool))
+				}
 			} else {
-				slotpool = slotpool[1:]
-				log.Printf("migrate one slot to group %d success, %d to migrate.", gid, len(slotpool))
+				slotPool = slotPool[1:]
+				log.Printf("migrate one slot to group %d success, %d to migrate.", gid, len(slotPool))
 			}
 		}
 	}
@@ -121,7 +141,7 @@ func balancer(n int) []int {
 	return a
 }
 
-func pickslots(g []int, tn int) []int {
+func pickSlots(g []int, tn int) []int {
 	if tn > len(g) {
 		return []int{}
 	} else {
@@ -129,14 +149,14 @@ func pickslots(g []int, tn int) []int {
 	}
 }
 
-func genauth(name string) string {
+func genAuth(name string) string {
 	s := []byte("Codis-XAuth-[" + name + "]")
 	md := sha256.Sum256(s)
 	mdstr := hex.EncodeToString(md[:32])
 	return mdstr[:32]
 }
 
-func setinterval(interval int, client *http.Client, xauth string, addr string) error {
+func setInterval(interval int, client *http.Client, xauth string, addr string) error {
 	url := "http://" + addr + "/api/topom/slots/action/interval/" + xauth + "/" + strconv.Itoa(interval)
 	req, err := http.NewRequest("PUT", url, nil)
 	if err != nil {
